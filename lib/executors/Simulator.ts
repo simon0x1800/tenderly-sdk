@@ -179,9 +179,9 @@ export class Simulator {
     }
     const encodingRequest = this.mapStateOverridesToEncodeStateRequest(overrides);
     try {
-      const { data: encodedStates } = await this.apiV1.post<
+      const response = await this.apiV1.post<
         EncodeStateRequest,
-        { stateOverrides: StateOverride }
+        { data: { stateOverrides: StateOverride } }
       >(
         `/account/${this.configuration.accountName}
           /project/${this.configuration.projectName}
@@ -189,7 +189,7 @@ export class Simulator {
         `,
         encodingRequest,
       );
-      return this.mapToEncodedOverrides(encodedStates.stateOverrides);
+      return this.mapToEncodedOverrides(response.data.stateOverrides);
     } catch (error) {
       if (isTenderlyAxiosError(error)) {
         throw new EncodingError(error.response.data.error);
@@ -202,7 +202,10 @@ export class Simulator {
   private async executeSimpleSimulationRequest(
     simulationRequest: SimulationRequest,
   ): Promise<SimulateSimpleResponse> {
-    const { data } = await this.apiV2.post<SimulationRequest, SimulateSimpleResponse>(
+    const response = await this.apiV2.post<
+      SimulationRequest,
+      { data: SimulateSimpleResponse }
+    >(
       `
         /account/${this.configuration.accountName}
         /project/${this.configuration.projectName}
@@ -211,13 +214,16 @@ export class Simulator {
       simulationRequest,
     );
 
-    return data;
+    return response.data;
   }
 
   private async executeSimulationBundleRequest(
     simulationRequest: SimulationBundleRequest,
   ): Promise<SimulateBundleResponse> {
-    const { data } = await this.apiV2.post<SimulationBundleRequest, SimulateBundleResponse>(
+    const response = await this.apiV2.post<
+      SimulationBundleRequest,
+      { data: SimulateBundleResponse }
+    >(
       `
         /account/${this.configuration.accountName}
         /project/${this.configuration.projectName}
@@ -226,7 +232,7 @@ export class Simulator {
       simulationRequest,
     );
 
-    return data;
+    return response.data;
   }
 
   /**
@@ -300,6 +306,60 @@ export class Simulator {
       );
     } catch (error) {
       handleError(error);
+    }
+  }
+
+  /**
+   * Simulates multiple transactions in parallel
+   * @async
+   * @function
+   * @param {SimulationParameters[]} simulationParamsArray - Array of simulation parameters
+   * @returns {Promise<(SimulationOutput | undefined)[]>} - Array of simulation results
+   */
+  async simulateTransactions(
+    simulationParamsArray: SimulationParameters[],
+  ): Promise<(SimulationOutput | undefined)[]> {
+    try {
+      // Execute all simulations in parallel using Promise.all
+      const simulationPromises = simulationParamsArray.map(params => 
+        this.simulateTransaction(params)
+      );
+      
+      return await Promise.all(simulationPromises);
+    } catch (error) {
+      handleError(error);
+      return [];
+    }
+  }
+
+  /**
+   * Simulates multiple transactions with a concurrency limit
+   * @async
+   * @function
+   * @param {SimulationParameters[]} simulationParamsArray - Array of simulation parameters
+   * @param {number} concurrencyLimit - Maximum number of concurrent simulations
+   * @returns {Promise<(SimulationOutput | undefined)[]>} - Array of simulation results
+   */
+  async simulateTransactionsWithLimit(
+    simulationParamsArray: SimulationParameters[],
+    concurrencyLimit: number = 5
+  ): Promise<(SimulationOutput | undefined)[]> {
+    try {
+      const results: (SimulationOutput | undefined)[] = [];
+      
+      // Process simulations in batches
+      for (let i = 0; i < simulationParamsArray.length; i += concurrencyLimit) {
+        const batch = simulationParamsArray.slice(i, i + concurrencyLimit);
+        const batchResults = await Promise.all(
+          batch.map(params => this.simulateTransaction(params))
+        );
+        results.push(...batchResults);
+      }
+      
+      return results;
+    } catch (error) {
+      handleError(error);
+      return [];
     }
   }
 }
